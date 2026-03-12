@@ -24,6 +24,7 @@ def sample_robot(p=0.55):
         "n_springs": springs.shape[0],
         "masses": masses,
         "springs": springs,
+        "mask": mask
     }
 
 # Convert a voxel position to a list of mass coordinates
@@ -77,19 +78,113 @@ def mask_to_robot(mask):
 # Zero out the rest of the mask
 # Shift the largest component to the bottom left corner of the mask
 def sample_mask(p):
-    mask = np.random.uniform(0.0, 1.0, size=(MASK_DIM, MASK_DIM))
-    mask = mask < p
+    while True:
+        mask = np.random.uniform(0.0, 1.0, size=(MASK_DIM, MASK_DIM)) < p
+        mask = canonicalize_mask(mask)
+        if mask.any():
+            return mask
+
+def boundary_candidates(mask_bool: np.ndarray):
+    struct = np.array([[0,1,0],
+                       [1,1,1],
+                       [0,1,0]], dtype=bool)
+
+    dil = ndimage.binary_dilation(mask_bool, structure=struct)
+    ero = ndimage.binary_erosion(mask_bool, structure=struct)
+
+    add = np.argwhere(dil & ~mask_bool)
+    rem = np.argwhere(mask_bool & ~ero)
+    return add, rem
+
+def canonicalize_mask(mask):
     labeled, num_features = ndimage.label(mask)
-    if num_features == 0: # If the mask is empty, try again
-        return sample_mask(p)
-    component_sizes = ndimage.sum(mask, labeled, range(1, num_features + 1))
+    if num_features == 0:
+        return np.zeros_like(mask, dtype=int)
+    component_sizes = ndimage.sum(mask, labeled,
+                                  range(1, num_features + 1))
     largest_component = np.argmax(component_sizes) + 1
     mask = (labeled == largest_component)
     rows, cols = np.where(mask)
-    min_row, max_row = rows.min(), rows.max()
-    min_col, max_col = cols.min(), cols.max()
-    component = mask[min_row:max_row+1, min_col:max_col+1]
-    new_mask = np.zeros((MASK_DIM, MASK_DIM), dtype=int)
-    component_height, component_width = component.shape
-    new_mask[MASK_DIM - component_height:MASK_DIM, 0:component_width] = component.astype(int)
-    return new_mask
+    r0, r1 = rows.min(), rows.max()
+    c0, c1 = cols.min(), cols.max()
+    component = mask[r0:r1+1, c0:c1+1]
+    out = np.zeros((MASK_DIM, MASK_DIM), dtype=int)
+    h, w = component.shape
+    out[MASK_DIM - h:MASK_DIM, 0:w] = component.astype(int)
+    return out
+
+def mutate_mask(mask: np.ndarray,
+                n_edits: int = 1,
+                add_prob: float = 0.6,
+                ensure_nonempty: bool = True,
+                rng: np.random.Generator | None = None) -> np.ndarray:
+    
+    rng = rng or np.random.default_rng()
+    m = mask.astype(bool).copy()
+    for _ in range(n_edits):
+        add_cand, rem_cand = boundary_candidates(m)
+        do_add = (rng.random() < add_prob)
+        if do_add and len(add_cand) > 0:
+            r, c = add_cand[rng.integers(len(add_cand))]
+            m[r, c] = True
+        elif (not do_add) and len(rem_cand) > 0:
+            r, c = rem_cand[rng.integers(len(rem_cand))]
+            m[r, c] = False
+        else:
+            if len(add_cand) > 0:
+                r, c = add_cand[rng.integers(len(add_cand))]
+                m[r, c] = True
+            elif len(rem_cand) > 0:
+                r, c = rem_cand[rng.integers(len(rem_cand))]
+                m[r, c] = False          
+    out = canonicalize_mask(m)
+    if ensure_nonempty and not out.any():
+        return mask
+    return out
+
+def crossover(parent_a, parent_b, rng, min_fill=3, max_tries=30):
+    A = parent_a.astype(bool)
+    B = parent_b.astype(bool)
+
+    # Precompute boundary candidates (you already have this helper)
+    addA, remA = boundary_candidates(A)   # add candidates touch A
+    addB, remB = boundary_candidates(B)
+
+    # If either parent is empty-ish, fall back
+    if A.sum() == 0 or B.sum() == 0:
+        return canonicalize_mask(A)
+
+    for _ in range(max_tries):
+        child = A.copy()
+
+        # pick a random rectangle in B
+        r0 = rng.integers(0, MASK_DIM)
+        r1 = rng.integers(r0 + 1, MASK_DIM + 1)
+        c0 = rng.integers(0, MASK_DIM)
+        c1 = rng.integers(c0 + 1, MASK_DIM + 1)
+
+        patch = B[r0:r1, c0:c1]
+        if patch.sum() == 0:
+            continue
+
+        # choose a target location in A near its boundary so we "attach" the patch
+        if len(addA) == 0:
+            # A is full or weird; just paste at same coords
+            tr0, tc0 = r0, c0
+        else:
+            tr, tc = addA[rng.integers(len(addA))]
+            # align patch roughly around chosen attachment point
+            tr0 = np.clip(tr - (r1 - r0)//2, 0, MASK_DIM - (r1 - r0))
+            tc0 = np.clip(tc - (c1 - c0)//2, 0, MASK_DIM - (c1 - c0))
+
+        tr1 = tr0 + (r1 - r0)
+        tc1 = tc0 + (c1 - c0)
+
+        child[tr0:tr1, tc0:tc1] = patch | child[tr0:tr1, tc0:tc1]
+
+        out = canonicalize_mask(child)
+        if out.sum() >= min_fill:
+            return out
+
+    # fallback: simple union tends to be safer than random rectangle overwrite
+    return canonicalize_mask(A | B)

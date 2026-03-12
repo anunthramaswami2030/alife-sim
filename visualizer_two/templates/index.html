@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <link href="{{ url_for('static', filename='style.css') }}" rel="stylesheet" />
+    <title>Two Robot Visualizer</title>
+</head>
+<body>
+    <div id="container">
+        <canvas id="canvas"></canvas>
+
+        <div id="controls">
+            <div class="control-group">
+                <div class="value-display">FPS: <span id="actualFps">--</span></div>
+                <div class="value-display">Step: <span id="stepDisplay">0</span></div>
+            </div>
+
+            <div class="control-group">
+                <div class="value-display">Robot 0: <span id="robot0Info">--</span></div>
+                <div class="value-display">Robot 1: <span id="robot1Info">--</span></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById("canvas");
+        const ctx = canvas.getContext("2d");
+
+        const actualFpsDisplay = document.getElementById("actualFps");
+        const stepDisplay = document.getElementById("stepDisplay");
+        const robot0Info = document.getElementById("robot0Info");
+        const robot1Info = document.getElementById("robot1Info");
+
+        let currentStep = 0;
+        let startCOM = [null, null];
+
+        const robots = [
+            {
+                springs: [],
+                positions: [],
+                activations: [],
+                centerOfMass: [0, 0],
+                nMasses: 0,
+                nSprings: 0,
+            },
+            {
+                springs: [],
+                positions: [],
+                activations: [],
+                centerOfMass: [0, 0],
+                nMasses: 0,
+                nSprings: 0,
+            }
+        ];
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            draw();
+        }
+
+        window.addEventListener("resize", resizeCanvas);
+        resizeCanvas();
+
+        const colormaps = {
+            magma: [
+                [0.001462, 0.000466, 0.013866],
+                [0.063536, 0.028426, 0.118956],
+                [0.188923, 0.071159, 0.232229],
+                [0.316654, 0.071689, 0.314706],
+                [0.444667, 0.074981, 0.383823],
+                [0.566949, 0.094290, 0.440529],
+                [0.680280, 0.131803, 0.484307],
+                [0.780105, 0.188923, 0.515993],
+                [0.864406, 0.265113, 0.536616],
+                [0.933010, 0.359688, 0.548053],
+                [0.987053, 0.991438, 0.749504]
+            ]
+        };
+
+        function getColorFromScale(value) {
+            const v = Math.max(0, Math.min(1, value));
+            const cmap = colormaps.magma;
+            const n = cmap.length - 1;
+            const idx = v * n;
+            const i0 = Math.floor(idx);
+            const i1 = Math.min(n, Math.ceil(idx));
+            const t = idx - i0;
+
+            const c0 = cmap[i0];
+            const c1 = cmap[i1];
+
+            const r = Math.floor((c0[0] + t * (c1[0] - c0[0])) * 255);
+            const g = Math.floor((c0[1] + t * (c1[1] - c0[1])) * 255);
+            const b = Math.floor((c0[2] + t * (c1[2] - c0[2])) * 255);
+
+            return `rgb(${r},${g},${b})`;
+        }
+
+        function getSharedCameraX() {
+            const valid = robots.filter(robot => robot.positions.length > 0);
+            if (valid.length === 0) {
+                return 0;
+            }
+
+            let sum = 0;
+            for (const robot of valid) {
+                sum += robot.centerOfMass[0];
+            }
+            return sum / valid.length;
+        }
+
+        function worldToScreen(x, y, robotIndex) {
+            const scale = 600;
+
+            const halfHeight = canvas.height / 2;
+            const viewportTop = robotIndex === 0 ? 0 : halfHeight;
+
+            const cx = canvas.width / 2;
+            const cy = viewportTop + halfHeight * 0.8;
+
+            const sharedCameraX = getSharedCameraX();
+
+            const offsetX = x - sharedCameraX;
+            const offsetY = y;
+
+            return {
+                x: cx + offsetX * scale,
+                y: cy - offsetY * scale
+            };
+        }
+
+        function drawBackground(robotIndex) {
+            const halfHeight = canvas.height / 2;
+            const viewportTop = robotIndex === 0 ? 0 : halfHeight;
+            const viewportBottom = viewportTop + halfHeight;
+
+            ctx.fillStyle = "#c5d5e0";
+            ctx.fillRect(0, viewportTop, canvas.width, halfHeight);
+
+            const cameraX = getSharedCameraX();
+
+            const gridSpacing = 0.5;
+            const pixelsPerUnit = 600;
+            const numLines = Math.ceil(canvas.width / pixelsPerUnit / gridSpacing) + 4;
+
+            const startX =
+                Math.floor(cameraX / gridSpacing) * gridSpacing -
+                (numLines / 2) * gridSpacing;
+
+            const groundY = worldToScreen(0, 0.02, robotIndex).y;
+
+            ctx.strokeStyle = "#6b8ca3";
+            ctx.lineWidth = 2;
+
+            for (let i = 0; i < numLines; i++) {
+                const worldX = startX + i * gridSpacing;
+                const screenPos = worldToScreen(worldX, 0, robotIndex);
+
+                ctx.beginPath();
+                ctx.moveTo(screenPos.x, groundY);
+                ctx.lineTo(screenPos.x, viewportBottom);
+                ctx.stroke();
+            }
+
+            ctx.strokeStyle = "#3d5a6b";
+            ctx.lineWidth = 3;
+
+            for (let i = 0; i < numLines; i++) {
+                const worldX = startX + i * gridSpacing;
+                const screenPos = worldToScreen(worldX, 0, robotIndex);
+
+                ctx.beginPath();
+                ctx.moveTo(screenPos.x, groundY - 8);
+                ctx.lineTo(screenPos.x, groundY + 8);
+                ctx.stroke();
+            }
+
+            ctx.strokeStyle = "#4a6b80";
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(0, groundY);
+            ctx.lineTo(canvas.width, groundY);
+            ctx.stroke();
+
+            ctx.strokeStyle = "#8da9bd";
+            ctx.lineWidth = 2;
+            ctx.strokeRect(0, viewportTop, canvas.width, halfHeight);
+
+            let distance = 0;
+            if (startCOM[robotIndex] !== null) {
+                distance = robots[robotIndex].centerOfMass[0] - startCOM[robotIndex];
+            }
+
+            ctx.fillStyle = "#1f2d3a";
+            ctx.font = "bold 18px Arial";
+            ctx.textAlign = "right";
+            ctx.textBaseline = "top";
+            ctx.fillText(
+                `Robot ${robotIndex}   ${distance.toFixed(2)} m`,
+                canvas.width - 20,
+                viewportTop + 20
+            );
+            ctx.textAlign = "start";
+            ctx.textBaseline = "alphabetic";
+        }
+
+        function drawRobot(robotIndex) {
+            const robot = robots[robotIndex];
+            if (robot.positions.length === 0) {
+                return;
+            }
+
+            ctx.lineWidth = 3;
+
+            for (let i = 0; i < robot.springs.length; i++) {
+                const spring = robot.springs[i];
+                const p1 = robot.positions[spring[0]];
+                const p2 = robot.positions[spring[1]];
+
+                if (!p1 || !p2) {
+                    continue;
+                }
+
+                const s1 = worldToScreen(p1[0], p1[1], robotIndex);
+                const s2 = worldToScreen(p2[0], p2[1], robotIndex);
+
+                const act = robot.activations[i] !== undefined ? robot.activations[i] : 0.5;
+                ctx.strokeStyle = getColorFromScale(act);
+
+                ctx.beginPath();
+                ctx.moveTo(s1.x, s1.y);
+                ctx.lineTo(s2.x, s2.y);
+                ctx.stroke();
+            }
+
+            ctx.fillStyle = robotIndex === 0 ? "#FFD166" : "#EF476F";
+
+            for (let i = 0; i < robot.positions.length; i++) {
+                const pos = robot.positions[i];
+                if (!pos) {
+                    continue;
+                }
+
+                const screen = worldToScreen(pos[0], pos[1], robotIndex);
+
+                ctx.beginPath();
+                ctx.arc(screen.x, screen.y, 5, 0, 2 * Math.PI);
+                ctx.fill();
+            }
+        }
+
+        function drawCOMGuide(robotIndex) {
+            const robot = robots[robotIndex];
+            if (robot.positions.length === 0) {
+                return;
+            }
+
+            const halfHeight = canvas.height / 2;
+            const viewportTop = robotIndex === 0 ? 0 : halfHeight;
+            const viewportBottom = viewportTop + halfHeight;
+
+            const screen = worldToScreen(
+                robot.centerOfMass[0],
+                robot.centerOfMass[1],
+                robotIndex
+            );
+
+            ctx.save();
+            ctx.strokeStyle = robotIndex === 0 ? "#b58900" : "#c9184a";
+            ctx.lineWidth = 2;
+            ctx.setLineDash([8, 8]);
+
+            ctx.beginPath();
+            ctx.moveTo(screen.x, viewportTop);
+            ctx.lineTo(screen.x, viewportBottom);
+            ctx.stroke();
+
+            ctx.restore();
+        }
+
+        function drawCOMMarker(robotIndex) {
+            const robot = robots[robotIndex];
+            if (robot.positions.length === 0) {
+                return;
+            }
+
+            const screen = worldToScreen(
+                robot.centerOfMass[0],
+                robot.centerOfMass[1],
+                robotIndex
+            );
+
+            ctx.strokeStyle = robotIndex === 0 ? "#b58900" : "#c9184a";
+            ctx.lineWidth = 2;
+
+            ctx.beginPath();
+            ctx.arc(screen.x, screen.y, 8, 0, 2 * Math.PI);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(screen.x - 10, screen.y);
+            ctx.lineTo(screen.x + 10, screen.y);
+            ctx.moveTo(screen.x, screen.y - 10);
+            ctx.lineTo(screen.x, screen.y + 10);
+            ctx.stroke();
+        }
+
+        function drawSharedReferenceLine() {
+            const x = canvas.width / 2;
+
+            ctx.save();
+            ctx.strokeStyle = "#22313f";
+            ctx.lineWidth = 2;
+            ctx.setLineDash([4, 8]);
+
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, canvas.height);
+            ctx.stroke();
+
+            ctx.restore();
+        }
+
+        function drawDivider() {
+            const y = canvas.height / 2;
+            ctx.strokeStyle = "#22313f";
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(canvas.width, y);
+            ctx.stroke();
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            drawBackground(0);
+            drawBackground(1);
+
+            drawSharedReferenceLine();
+
+            drawCOMGuide(0);
+            drawRobot(0);
+            drawCOMMarker(0);
+
+            drawCOMGuide(1);
+            drawRobot(1);
+            drawCOMMarker(1);
+
+            drawDivider();
+        }
+
+        function updateRobotInfo() {
+            robot0Info.textContent = `${robots[0].nMasses} masses, ${robots[0].nSprings} springs`;
+            robot1Info.textContent = `${robots[1].nMasses} masses, ${robots[1].nSprings} springs`;
+        }
+
+        function handleTopology(msg) {
+            if (!msg.robots || !Array.isArray(msg.robots)) {
+                return;
+            }
+
+            for (const r of msg.robots) {
+                const idx = r.robot_index;
+                if (idx < 0 || idx >= robots.length) {
+                    continue;
+                }
+
+                robots[idx].springs = r.springs || [];
+                robots[idx].nMasses = r.n_masses || 0;
+                robots[idx].nSprings = r.n_springs || 0;
+            }
+
+            updateRobotInfo();
+            console.log("Loaded topology for both robots:", robots);
+        }
+
+        function handleStep(msg) {
+            if (!msg.robots || !Array.isArray(msg.robots)) {
+                return;
+            }
+
+            for (const r of msg.robots) {
+                const idx = r.robot_index;
+                if (idx < 0 || idx >= robots.length) {
+                    continue;
+                }
+
+                robots[idx].positions = r.positions || [];
+                robots[idx].activations = r.activations || [];
+                robots[idx].centerOfMass = r.center_of_mass || [0, 0];
+
+                if (startCOM[idx] === null) {
+                    startCOM[idx] = robots[idx].centerOfMass[0];
+                }
+            }
+
+            currentStep = msg.step || 0;
+            stepDisplay.textContent = currentStep;
+
+            if (msg.fps !== undefined) {
+                actualFpsDisplay.textContent = Number(msg.fps).toFixed(0);
+            }
+
+            draw();
+        }
+
+        function startStream() {
+            const es = new EventSource("/stream");
+
+            es.onmessage = (event) => {
+                if (!event.data) {
+                    return;
+                }
+
+                const msg = JSON.parse(event.data);
+
+                if (msg.type === "topology") {
+                    handleTopology(msg);
+                } else if (msg.type === "step") {
+                    handleStep(msg);
+                }
+            };
+
+            es.onerror = (error) => {
+                console.error("EventSource error:", error);
+            };
+        }
+
+        window.addEventListener("load", () => {
+            startStream();
+            draw();
+        });
+    </script>
+</body>
+</html>

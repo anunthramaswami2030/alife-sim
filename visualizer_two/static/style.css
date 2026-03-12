@@ -1,0 +1,132 @@
+/* =========================
+   Global
+   ========================= */
+
+body {
+    margin: 0;
+    padding: 0;
+    font-family: Arial, sans-serif;
+    background-color: #1a1a1a;
+    color: #ffffff;
+    overflow: hidden;
+}
+
+/* =========================
+   Layout
+   ========================= */
+
+#container {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+}
+
+#canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+/* =========================
+   Control Panel
+   ========================= */
+
+#controls {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+
+    padding: 12px 16px;
+    border-radius: 6px;
+
+    background: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(10px);
+
+    z-index: 100;
+}
+
+#controls h3 {
+    margin: 0 0 8px 0;
+    font-size: 16px;
+    color: #FFD166;
+}
+
+.control-group {
+    margin-bottom: 6px;
+}
+
+/* =========================
+   Form Elements
+   ========================= */
+
+label {
+    display: block;
+    font-size: 14px;
+    font-weight: bold;
+    margin-bottom: 4px;
+}
+
+input[type="range"] {
+    width: 100%;
+    margin-bottom: 4px;
+}
+
+select {
+    width: 100%;
+    padding: 6px;
+
+    background: #333;
+    color: white;
+
+    border: 1px solid #555;
+    border-radius: 4px;
+}
+
+/* =========================
+   Text Helpers
+   ========================= */
+
+.value-display {
+    font-size: 12px;
+    color: #cccccc;
+    margin: 2px 0;
+}
+
+small {
+    font-size: 11px;
+    color: #999999;
+}
+
+/* =========================
+   Buttons
+   ========================= */
+
+button {
+    padding: 8px 16px;
+    margin-right: 6px;
+
+    font-size: 14px;
+    border: none;
+    border-radius: 4px;
+
+    background-color: #4CAF50;
+    color: white;
+
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+button:hover:not(:disabled) {
+    background-color: #45a049;
+}
+
+button:active:not(:disabled) {
+    background-color: #3d8b40;
+}
+
+button:disabled {
+    background-color: #333;
+    color: #666;
+    opacity: 0.5;
+    cursor: not-allowed;
+}
