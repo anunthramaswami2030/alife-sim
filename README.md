@@ -10,7 +10,7 @@ For this project, I enhanced the traditional parallel hill climber algorithm usi
 <img width="1219" height="934" alt="Screenshot from 2026-03-11 23-56-04" src="https://github.com/user-attachments/assets/0e6e360d-4156-4968-aae1-6b3c4d1b50f6" />
 
 # Plots
-This plot illustrates how the fitness of the modified (surrogate) parellel hill climber increases faster than that of the random parallel hill climber.Note that for fairness, the random parallel hill climber was allowed to simulate four random children to keep the number of simulations consistent across both algorithms.
+This plot illustrates how the fitness of the modified (surrogate) parellel hill climber increases faster than that of the random parallel hill climber. Note that for fairness, the random parallel hill climber was allowed to simulate four random children to keep the number of simulations consistent across both algorithms. This data was averaged over four different seeds.
 
 <img width="1134" height="908" alt="combined" src="https://github.com/user-attachments/assets/91269a38-a57a-4a2a-a022-1188f1e30acd" />
 
